@@ -51,4 +51,85 @@ footer{text-align:center;font-size:12px;opacity:.7;margin-top:10px}
   <button class="boost alt" id="iapNoAds">🚫 Supprimer les pubs entre niveaux (achat)</button>
   <footer>Pizza Rush · jeu original</footer>
 </main>www/index.html
-<div id="ad"><div>Publicité en cours…<br><span id="adT">3</span></div></div>
+<div id="ad"><div>Publicité en cours…<br><span id="adT">3</span></div></div><script>
+// ---- Monétisation : à brancher sur un vrai SDK (AdMob, Unity Ads, etc.) ----
+const MONETIZATION={
+  purchase(id,onDone){ onDone(); }, // TEST : à remplacer par Google Play Billing avant publication
+  showInterstitial(){ /* à brancher sur le SDK (pub plein écran) */ },
+  showRewardedAd(onDone){ // Remplacer par l'appel du SDK publicitaire réel
+    const el=document.getElementById('ad'),t=document.getElementById('adT');let n=3;
+    el.style.display='flex';t.textContent=n;
+    const iv=setInterval(()=>{n--;t.textContent=n;if(n<=0){clearInterval(iv);el.style.display='none';onDone();}},1000);
+  }
+};
+// ----------------------------------------------------------------------------
+const defs=[
+ {id:'price',name:'Prix de la pizza',desc:n=>`Gain par pizza : ${(1+n)} €`,base:15,g:1.35},
+ {id:'cook',name:'Cuisinier',desc:n=>`+${n} pizza(s)/s automatiques`,base:50,g:1.25},
+ {id:'oven',name:'Four rapide',desc:n=>`Pizzas par clic : ${1+n}`,base:120,g:1.5},
+ {id:'shop',name:'Nouveau restaurant',desc:n=>`+${n*8} €/s`,base:600,g:1.4}
+];
+let S={cash:0,lv:{price:0,cook:0,oven:0,shop:0},boostUntil:0,stars:0,vip:false,noAds:false,lastDaily:'',lastSeen:Date.now(),ups:0};
+try{const s=localStorage.getItem('pizzarush');if(s)S=Object.assign(S,JSON.parse(s));}catch(e){}
+const $=id=>document.getElementById(id);
+const cost=d=>Math.floor(d.base*Math.pow(d.g,S.lv[d.id]));
+const mult=()=>(Date.now()<S.boostUntil?2:1)*(S.vip?2:1)*(1+S.stars*0.25);
+const perClick=()=>(1+S.lv.price)*(1+S.lv.oven)*mult();
+const perSec=()=>(S.lv.cook*(1+S.lv.price)+S.lv.shop*8)*mult();
+const fmt=n=>n>=1e6?(n/1e6).toFixed(2)+' M':n>=1e4?(n/1e3).toFixed(1)+' k':Math.floor(n).toString();
+function build(){
+  $('ups').innerHTML='';
+  defs.forEach(d=>{
+    const r=document.createElement('div');r.className='up';
+    r.innerHTML=`<div><b>${d.name} (niv. ${S.lv[d.id]})</b><small>${d.desc(S.lv[d.id])}</small></div><button id="b_${d.id}"></button>`;
+    $('ups').appendChild(r);
+    $('b_'+d.id).onclick=()=>{const c=cost(d);if(S.cash>=c){S.cash-=c;S.lv[d.id]++;if(++S.ups%8===0&&!S.noAds)MONETIZATION.showInterstitial();build();render();save();}};
+  });
+}
+function render(){
+  $('cash').textContent=fmt(S.cash)+' €';
+  $('rate').textContent=`${fmt(perSec())} €/s · ${fmt(perClick())} € par clic`;
+  defs.forEach(d=>{const b=$('b_'+d.id);if(b){b.textContent=fmt(cost(d))+' €';b.disabled=S.cash<cost(d);}});
+  const left=Math.max(0,S.boostUntil-Date.now());
+  $('boostTag').textContent=left?`×2 · ${Math.ceil(left/1000)} s`:'';
+  $('boost').disabled=left>0;
+  const g=Math.floor(total()/12);
+  $('prestige').textContent='⭐ Prestige : +'+g+' étoile(s) (+25 % chacune) · tu en as '+S.stars;
+  $('prestige').disabled=g<1;
+  $('daily').disabled=S.lastDaily===today();
+  $('iapVip').style.display=S.vip?'none':'';
+  $('iapNoAds').style.display=S.noAds?'none':'';
+}
+function save(){S.lastSeen=Date.now();try{localStorage.setItem('pizzarush',JSON.stringify(S));}catch(e){}}
+$('oven').onclick=e=>{
+  S.cash+=perClick();
+  const p=document.createElement('div');p.className='pop';p.textContent='+'+fmt(perClick())+' €';
+  const r=e.target.getBoundingClientRect();p.style.left=(r.left+r.width/2-20+Math.random()*40)+'px';p.style.top=(r.top+20)+'px';
+  document.body.appendChild(p);setTimeout(()=>p.remove(),800);
+  render();
+};
+$('boost').onclick=()=>MONETIZATION.showRewardedAd(()=>{S.boostUntil=Date.now()+60000;render();save();});
+let last=Date.now();
+setInterval(()=>{
+  const now=Date.now(),dt=(now-last)/1000;last=now;
+  S.cash+=perSec()*dt;
+  $('bar').style.width=Math.min(100,(S.lv.price+S.lv.cook+S.lv.oven+S.lv.shop)*4)+'%';
+  render();
+},250);
+setInterval(save,5000);
+const total=()=>Object.values(S.lv).reduce((a,b)=>a+b,0);
+const today=()=>new Date().toDateString();
+function toast(msg,label,fn){const t=document.createElement('div');t.style.cssText='position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));background:var(--card);color:var(--ink);border:2px solid var(--gold);border-radius:14px;padding:12px;z-index:8;text-align:center';t.textContent=msg;if(fn){const b=document.createElement('button');b.textContent=label;b.style.cssText='display:block;margin:8px auto 0;padding:10px 14px;border:0;border-radius:10px;background:var(--red);color:#fff;font-weight:700';b.onclick=()=>{t.remove();fn();};t.appendChild(b);}document.body.appendChild(t);setTimeout(()=>t.remove(),8000);}
+$('iapVip').onclick=()=>MONETIZATION.purchase('vip',()=>{S.vip=true;save();render();});
+$('iapNoAds').onclick=()=>MONETIZATION.purchase('noads',()=>{S.noAds=true;save();render();});
+$('daily').onclick=()=>{if(S.lastDaily===today())return;const g=Math.floor(200+perSec()*300);S.lastDaily=today();S.cash+=g;toast('🎁 +'+fmt(g)+' € ! Reviens demain.');save();render();};
+$('prestige').onclick=()=>{const g=Math.floor(total()/12);if(g<1)return;S.stars+=g;S.cash=0;S.lv={price:0,cook:0,oven:0,shop:0};S.boostUntil=0;build();render();save();toast('⭐ +'+g+' étoile(s) ! Revenus boostés pour toujours.');};
+function golden(){const b=document.createElement('button');b.className='gold';b.textContent='🌟';b.setAttribute('aria-label','Pizza dorée');b.style.left=(10+Math.random()*70)+'vw';b.style.top=(20+Math.random()*50)+'vh';b.onclick=()=>{const g=Math.floor(perSec()*30+perClick()*20);S.cash+=g;b.remove();toast('🌟 Pizza dorée : +'+fmt(g)+' €');};document.body.appendChild(b);setTimeout(()=>b.remove(),6000);setTimeout(golden,45000+Math.random()*45000);}
+setTimeout(golden,30000);
+const away=Math.min((Date.now()-S.lastSeen)/1000,28800),gain=perSec()*away*0.5;
+if(gain>=1){S.cash+=gain;toast('Pendant ton absence : +'+fmt(gain)+' €','📺 ×2 avec une pub',()=>MONETIZATION.showRewardedAd(()=>{S.cash+=gain;render();}));}
+build();render();
+</script>
+<script src="native-ads.js"></script>
+</body>
+  </html>
